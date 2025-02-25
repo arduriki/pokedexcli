@@ -3,18 +3,24 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
 )
 
+type Config struct {
+	Next     string
+	Previous string
+}
+
 type cliCommand struct {
 	name        string
 	description string
-	callback    func() error
+	callback    func(*Config) error
 }
 
-// Commands as a global variable, but not initialized
 var commands map[string]cliCommand
 
 func main() {
@@ -80,13 +86,13 @@ func cleanInput(text string) []string {
 	return words
 }
 
-func commandExit() error {
+func commandExit(cfg *Config) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 	return nil
 }
 
-func commandHelp() error {
+func commandHelp(cfg *Config) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println()
@@ -107,4 +113,36 @@ func commandHelp() error {
 	}
 
 	return nil
+}
+
+func makeGetRequest(url string) ([]byte, error) {
+	// Create an HTTP client
+	client := &http.Client{}
+
+	// Create a GET request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Send the request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	// Close the response body once it's done
+	defer resp.Body.Close()
+
+	// Check if the response status code is OK (200)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP request failed with status code: %d", resp.StatusCode)
+	}
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }
