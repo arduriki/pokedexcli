@@ -9,11 +9,15 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/arduriki/pokedexcli/internal/pokecache"
 )
 
 type Config struct {
 	Next     string
 	Previous string
+	Cache    *pokecache.Cache
 }
 
 type cliCommand struct {
@@ -40,6 +44,7 @@ func main() {
 	config := &Config{
 		Next:     "https://pokeapi.co/api/v2/location-area/",
 		Previous: "",
+		Cache: pokecache.NewCache(5 * time.Minute),
 	}
 
 	// Initialize commands
@@ -150,7 +155,7 @@ func commandMap(cfg *Config) error {
 	}
 
 	// Get location areas from the API
-	locationsResp, err := getLocationAreas(cfg.Next)
+	locationsResp, err := getLocationAreas(cfg.Next, cfg.Cache)
 	if err != nil {
 		return err
 	}
@@ -184,7 +189,7 @@ func commandMapb(cfg *Config) error {
 	}
 
 	// Get location areas from the API
-	locationsResp, err := getLocationAreas(cfg.Previous)
+	locationsResp, err := getLocationAreas(cfg.Previous, cfg.Cache)
 	if err != nil {
 		return err
 	}
@@ -210,7 +215,13 @@ func commandMapb(cfg *Config) error {
 	return nil
 }
 
-func makeGetRequest(url string) ([]byte, error) {
+func makeGetRequest(url string, cache *pokecache.Cache) ([]byte, error) {
+	// Try to get from cache first
+	if cachedData, ok := cache.Get(url); ok {
+		// If found in cache, return it immediately
+		return cachedData, nil
+	}
+
 	// Create an HTTP client
 	client := &http.Client{}
 
@@ -239,12 +250,15 @@ func makeGetRequest(url string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Save to cache before returning
+	cache.Add(url, body)
+
 	return body, nil
 }
 
-func getLocationAreas(url string) (LocationAreasResp, error) {
+func getLocationAreas(url string, cache *pokecache.Cache) (LocationAreasResp, error) {
 	// Make the HTTP GET request
-	body, err := makeGetRequest(url)
+	body, err := makeGetRequest(url, cache)
 	if err != nil {
 		return LocationAreasResp{}, err
 	}
