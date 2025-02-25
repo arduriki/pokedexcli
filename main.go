@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,9 +22,26 @@ type cliCommand struct {
 	callback    func(*Config) error
 }
 
+// LocationAreasResp models the response from the location areas API
+type LocationAreasResp struct {
+	Count    int     `json:"count"`
+	Next     *string `json:"next"`
+	Previous *string `json:"previous"`
+	Results  []struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"results"`
+}
+
 var commands map[string]cliCommand
 
 func main() {
+	// Initialize the Config with base URL
+	config := &Config{
+		Next:     "https://pokeapi.co/api/v2/location-area/",
+		Previous: "",
+	}
+
 	// Initialize commands
 	commands = map[string]cliCommand{
 		"exit": {
@@ -36,7 +54,18 @@ func main() {
 			description: "Displays a help message",
 			callback:    commandHelp,
 		},
+		"map": {
+			name:        "map",
+			description: "Display the next 20 location areas in the Pokemon world",
+			callback:    commandMap,
+		},
+		"mapb": {
+			name:        "mapb",
+			description: "Display the previous 20 location areas in the Pokemon world",
+			callback:    commandMapb,
+		},
 	}
+
 	// Create a scanner to read an input
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -64,15 +93,14 @@ func main() {
 		command, exists := commands[commandName]
 
 		if exists {
-			// If command exists, call its callback
-			err := command.callback()
+			// If command exists, call its callback with config
+			err := command.callback(config)
 			if err != nil {
 				fmt.Printf("Error executing command: %s\n", err)
 			}
 		} else {
 			fmt.Println("Unknown command")
 		}
-
 	}
 }
 
@@ -115,6 +143,73 @@ func commandHelp(cfg *Config) error {
 	return nil
 }
 
+func commandMap(cfg *Config) error {
+	// Check if we have a URL to fetch
+	if cfg.Next == "" {
+		return fmt.Errorf("No more locations to fetch")
+	}
+
+	// Get location areas from the API
+	locationsResp, err := getLocationAreas(cfg.Next)
+	if err != nil {
+		return err
+	}
+
+	// Update the Next and Previous URLs in the config
+	if locationsResp.Next != nil {
+		cfg.Next = *locationsResp.Next
+	} else {
+		cfg.Next = ""
+	}
+
+	if locationsResp.Previous != nil {
+		cfg.Previous = *locationsResp.Previous
+	} else {
+		cfg.Previous = ""
+	}
+
+	// Display the location areas
+	for _, location := range locationsResp.Results {
+		fmt.Println(location.Name)
+	}
+
+	return nil
+}
+
+func commandMapb(cfg *Config) error {
+	// Check if we have a previous URL to fetch
+	if cfg.Previous == "" {
+		fmt.Println("You're on the first page.")
+		return nil
+	}
+
+	// Get location areas from the API
+	locationsResp, err := getLocationAreas(cfg.Previous)
+	if err != nil {
+		return err
+	}
+
+	// Update the next and previous URLs in the config
+	if locationsResp.Next != nil {
+		cfg.Next = *locationsResp.Next
+	} else {
+		cfg.Next = ""
+	}
+
+	if locationsResp.Previous != nil {
+		cfg.Previous = *locationsResp.Previous
+	} else {
+		cfg.Previous = ""
+	}
+
+	// Display the location areas
+	for _, location := range locationsResp.Results {
+		fmt.Println(location.Name)
+	}
+
+	return nil
+}
+
 func makeGetRequest(url string) ([]byte, error) {
 	// Create an HTTP client
 	client := &http.Client{}
@@ -145,4 +240,21 @@ func makeGetRequest(url string) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+func getLocationAreas(url string) (LocationAreasResp, error) {
+	// Make the HTTP GET request
+	body, err := makeGetRequest(url)
+	if err != nil {
+		return LocationAreasResp{}, err
+	}
+
+	// Unmarshal the JSON into our struct
+	var locationsResp LocationAreasResp
+	err = json.Unmarshal(body, &locationsResp)
+	if err != nil {
+		return LocationAreasResp{}, err
+	}
+
+	return locationsResp, nil
 }
