@@ -123,7 +123,7 @@ func main() {
 			callback:    commandCatch,
 		},
 		"inspect": {
-			name:        "inpect",
+			name:        "inspect",
 			description: "Inspect a caught Pokemon. Usage: inspect [pokemon-name]",
 			callback:    commandInspect,
 		},
@@ -170,7 +170,7 @@ func main() {
 			// If command exists, call its callback with config
 			err := command.callback(config, args)
 			if err != nil {
-				fmt.Printf("Error executing command: %s\n", err)
+				fmt.Println(err)
 			}
 		} else {
 			fmt.Println("Unknown command")
@@ -303,7 +303,7 @@ func commandExplore(cfg *Config, args []string) error {
 	}
 
 	// Display the location area name
-	fmt.Printf("exploring %s...\n", &locationDetails.Name)
+	fmt.Printf("exploring %s...\n", locationDetails.Name)
 
 	// Check if there are any Pokemon encounters
 	if len(locationDetails.PokemonEncounters) == 0 {
@@ -480,25 +480,24 @@ func commandInspect(cfg *Config, args []string) error {
 	// Check if the Pokemon is in the caught map
 	pokemon, ok := cfg.CaughtPokemon[pokemonName]
 	if !ok {
-		return fmt.Errorf("you haven't caught %s yet", pokemonName)
+		return fmt.Errorf("you haven't caught that pokemon")
 	}
 
 	// Display the Pokemon details
 	fmt.Printf("Name: %s\n", pokemon.Name)
-	fmt.Printf("Base Experience: %d\n", pokemon.BaseExperience)
 	fmt.Printf("Height: %d\n", pokemon.Height)
 	fmt.Printf("Weight: %d\n", pokemon.Weight)
-
-	// Display types
-	fmt.Println("Types:")
-	for _, typeInfo := range pokemon.Types {
-		fmt.Printf(" - %s\n", typeInfo.Type.Name)
-	}
 
 	// Display stats
 	fmt.Println("Stats:")
 	for _, stat := range pokemon.Stats {
 		fmt.Printf(" - %s: %d\n", stat.Stat.Name, stat.BaseStat)
+	}
+
+	// Display types
+	fmt.Println("Types:")
+	for _, typeInfo := range pokemon.Types {
+		fmt.Printf(" - %s\n", typeInfo.Type.Name)
 	}
 
 	return nil
