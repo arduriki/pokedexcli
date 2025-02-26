@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -15,9 +17,10 @@ import (
 )
 
 type Config struct {
-	Next     string
-	Previous string
-	Cache    *pokecache.Cache
+	Next          string
+	Previous      string
+	Cache         *pokecache.Cache
+	CaughtPokemon map[string]Pokemon
 }
 
 type cliCommand struct {
@@ -56,14 +59,35 @@ type LocationAreaDetails struct {
 	} `json:"pokemon_encounters"`
 }
 
+// Pokemon represents a caught Pokemon
+type Pokemon struct {
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	BaseExperience int    `json:"base_experience"`
+	Height         int    `json:"height"`
+	Weight         int    `json:"weight"`
+	Stats          []struct {
+		BaseStat int `json:"base_stat"`
+		Stat     struct {
+			Name string `json:"name"`
+		} `json:"stat"`
+	} `json:"stats"`
+	Types []struct {
+		Type struct {
+			Name string `json:"name"`
+		} `json:"type"`
+	} `json:"types"`
+}
+
 var commands map[string]cliCommand
 
 func main() {
 	// Initialize the Config with base URL
 	config := &Config{
-		Next:     "https://pokeapi.co/api/v2/location-area/",
-		Previous: "",
-		Cache:    pokecache.NewCache(5 * time.Minute),
+		Next:          "https://pokeapi.co/api/v2/location-area/",
+		Previous:      "",
+		Cache:         pokecache.NewCache(5 * time.Minute),
+		CaughtPokemon: make(map[string]Pokemon),
 	}
 
 	// Initialize commands
@@ -89,9 +113,24 @@ func main() {
 			callback:    commandMapb,
 		},
 		"explore": {
-			name: "explore",
+			name:        "explore",
 			description: "Explore a location area to find Pokemon. Usage: explore [location-area-name]",
-			callback: commandExplore,
+			callback:    commandExplore,
+		},
+		"catch": {
+			name:        "catch",
+			description: "Attempt to catch a Pokemon. Usage: catch [pokemon-name]",
+			callback:    commandCatch,
+		},
+		"inspect": {
+			name:        "inpect",
+			description: "Inspect a caught Pokemon. Usage: inspect [pokemon-name]",
+			callback:    commandInspect,
+		},
+		"pokedex": {
+			name:        "pokedex",
+			description: "List all the Pokemon in your Pokedex",
+			callback:    commandPokedex,
 		},
 	}
 
@@ -181,7 +220,7 @@ func commandHelp(cfg *Config, args []string) error {
 func commandMap(cfg *Config, args []string) error {
 	// Check if we have a URL to fetch
 	if cfg.Next == "" {
-		return fmt.Errorf("No more locations to fetch")
+		return fmt.Errorf("no more locations to fetch")
 	}
 
 	// Get location areas from the API
@@ -248,7 +287,7 @@ func commandMapb(cfg *Config, args []string) error {
 func commandExplore(cfg *Config, args []string) error {
 	// Check if the location area name was provided
 	if len(args) == 0 {
-		return fmt.Errorf("Please provide a location area name to explore")
+		return fmt.Errorf("please provide a location area name to explore")
 	}
 
 	// Get the location area name from the arguments
@@ -264,7 +303,7 @@ func commandExplore(cfg *Config, args []string) error {
 	}
 
 	// Display the location area name
-	fmt.Printf("Exploring %s...\n", &locationDetails.Name)
+	fmt.Printf("exploring %s...\n", &locationDetails.Name)
 
 	// Check if there are any Pokemon encounters
 	if len(locationDetails.PokemonEncounters) == 0 {
@@ -354,4 +393,129 @@ func getLocationAreas(url string, cache *pokecache.Cache) (LocationAreasResp, er
 	}
 
 	return locationsResp, nil
+}
+
+func commandCatch(cfg *Config, args []string) error {
+	// Check if the Pokemon name was provided
+	if len(args) == 0 {
+		return fmt.Errorf("Please provide a Pokemon name to catch")
+	}
+
+	// Get the Pokemon name from the arguments
+	pokemonName := args[0]
+
+	// Print the throwing message
+	fmt.Printf("Throwing a Pokeball at %s...\n", pokemonName)
+
+	// Construct the URL for the Pokemon API
+	url := fmt.Sprintf("https://pokeapi.co/api/v2/pokemon/%s/", pokemonName)
+
+	// Get Pokemon details from the API
+	pokemonDetails, err := getPokemonDetails(url, cfg.Cache)
+	if err != nil {
+		return fmt.Errorf("failed to find Pokemon: %s", err)
+	}
+
+	// Calculate catch probability (lower base_experience = higher chance)
+	catchProbability := calculateCatchProbability(pokemonDetails.BaseExperience)
+
+	// Generate a random number
+	randomValue := rand.Float64()
+
+	// Check if Pokemon is caught
+	if randomValue <= catchProbability {
+		fmt.Printf("%s was caught!\n", pokemonDetails.Name)
+
+		// Add to caught Pokemon map
+		if cfg.CaughtPokemon == nil {
+			cfg.CaughtPokemon = make(map[string]Pokemon)
+		}
+		cfg.CaughtPokemon[pokemonDetails.Name] = pokemonDetails
+
+		fmt.Printf("Added %s to your Pokedex.\n", pokemonDetails.Name)
+	} else {
+		fmt.Printf("%s escaped!\n", pokemonDetails.Name)
+	}
+
+	return nil
+}
+
+func calculateCatchProbability(baseExperience int) float64 {
+	// Simple formula that gives lower chance for higher baseExperience
+	baseProb := 0.7
+	expFactor := float64(baseExperience) / 200.0
+
+	// Clamp probability between 0.1 and 0.9
+	probability := math.Max(0.1, math.Min(0.9, baseProb-expFactor))
+
+	return probability
+}
+
+func getPokemonDetails(url string, cache *pokecache.Cache) (Pokemon, error) {
+	// Make the HTTP GET request
+	body, err := makeGetRequest(url, cache)
+	if err != nil {
+		return Pokemon{}, err
+	}
+
+	// Unmarshal the JSON into the struct
+	var pokemonDetails Pokemon
+	err = json.Unmarshal(body, &pokemonDetails)
+	if err != nil {
+		return Pokemon{}, err
+	}
+
+	return pokemonDetails, nil
+}
+
+func commandInspect(cfg *Config, args []string) error {
+	// Check if the Pokemon name was provided
+	if len(args) == 0 {
+		return fmt.Errorf("please provide a Pokemon name to inspect")
+	}
+
+	// Get the Pokemon name from the arguments
+	pokemonName := args[0]
+
+	// Check if the Pokemon is in the caught map
+	pokemon, ok := cfg.CaughtPokemon[pokemonName]
+	if !ok {
+		return fmt.Errorf("you haven't caught %s yet", pokemonName)
+	}
+
+	// Display the Pokemon details
+	fmt.Printf("Name: %s\n", pokemon.Name)
+	fmt.Printf("Base Experience: %d\n", pokemon.BaseExperience)
+	fmt.Printf("Height: %d\n", pokemon.Height)
+	fmt.Printf("Weight: %d\n", pokemon.Weight)
+
+	// Display types
+	fmt.Println("Types:")
+	for _, typeInfo := range pokemon.Types {
+		fmt.Printf(" - %s\n", typeInfo.Type.Name)
+	}
+
+	// Display stats
+	fmt.Println("Stats:")
+	for _, stat := range pokemon.Stats {
+		fmt.Printf(" - %s: %d\n", stat.Stat.Name, stat.BaseStat)
+	}
+
+	return nil
+}
+
+func commandPokedex(cfg *Config, args []string) error {
+	// Check if the Pokedex is empty
+	if len(cfg.CaughtPokemon) == 0 {
+		fmt.Println("Your Pokedex is empty. Go catch some Pokemon!")
+		return nil
+	}
+
+	// Display the Pokedex
+	fmt.Println("Your Pokedex:")
+	for name := range cfg.CaughtPokemon {
+		fmt.Printf(" - %s\n", name)
+	}
+
+	return nil
 }
