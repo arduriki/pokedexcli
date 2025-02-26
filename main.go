@@ -23,7 +23,7 @@ type Config struct {
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*Config) error
+	callback    func(*Config, []string) error
 }
 
 // LocationAreasResp models the response from the location areas API
@@ -37,6 +37,25 @@ type LocationAreasResp struct {
 	} `json:"results"`
 }
 
+// LocationAreaDetails models the response from the location area details API
+type LocationAreaDetails struct {
+	ID                int    `json:"id"`
+	Name              string `json:"name"`
+	PokemonEncounters []struct {
+		Pokemon struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"pokemon"`
+		VersionDetails []struct {
+			EncounterDetails []struct {
+				Chance   int `json:"chance"`
+				MaxLevel int `json:"max_level"`
+				MinLevel int `json:"min_level"`
+			} `json:"encounter_details"`
+		} `json:"version_details"`
+	} `json:"pokemon_encounters"`
+}
+
 var commands map[string]cliCommand
 
 func main() {
@@ -44,7 +63,7 @@ func main() {
 	config := &Config{
 		Next:     "https://pokeapi.co/api/v2/location-area/",
 		Previous: "",
-		Cache: pokecache.NewCache(5 * time.Minute),
+		Cache:    pokecache.NewCache(5 * time.Minute),
 	}
 
 	// Initialize commands
@@ -68,6 +87,11 @@ func main() {
 			name:        "mapb",
 			description: "Display the previous 20 location areas in the Pokemon world",
 			callback:    commandMapb,
+		},
+		"explore": {
+			name: "explore",
+			description: "Explore a location area to find Pokemon. Usage: explore [location-area-name]",
+			callback: commandExplore,
 		},
 	}
 
@@ -98,8 +122,14 @@ func main() {
 		command, exists := commands[commandName]
 
 		if exists {
+			// Get the arguments
+			args := []string{}
+			if len(cleaned) > 1 {
+				args = cleaned[1:]
+			}
+
 			// If command exists, call its callback with config
-			err := command.callback(config)
+			err := command.callback(config, args)
 			if err != nil {
 				fmt.Printf("Error executing command: %s\n", err)
 			}
@@ -119,13 +149,13 @@ func cleanInput(text string) []string {
 	return words
 }
 
-func commandExit(cfg *Config) error {
+func commandExit(cfg *Config, args []string) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 	return nil
 }
 
-func commandHelp(cfg *Config) error {
+func commandHelp(cfg *Config, args []string) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println()
@@ -148,7 +178,7 @@ func commandHelp(cfg *Config) error {
 	return nil
 }
 
-func commandMap(cfg *Config) error {
+func commandMap(cfg *Config, args []string) error {
 	// Check if we have a URL to fetch
 	if cfg.Next == "" {
 		return fmt.Errorf("No more locations to fetch")
@@ -181,7 +211,7 @@ func commandMap(cfg *Config) error {
 	return nil
 }
 
-func commandMapb(cfg *Config) error {
+func commandMapb(cfg *Config, args []string) error {
 	// Check if we have a previous URL to fetch
 	if cfg.Previous == "" {
 		fmt.Println("You're on the first page.")
@@ -213,6 +243,59 @@ func commandMapb(cfg *Config) error {
 	}
 
 	return nil
+}
+
+func commandExplore(cfg *Config, args []string) error {
+	// Check if the location area name was provided
+	if len(args) == 0 {
+		return fmt.Errorf("Please provide a location area name to explore")
+	}
+
+	// Get the location area name from the arguments
+	locationName := args[0]
+
+	// Construct the URL for the area details
+	url := fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%s/", locationName)
+
+	// Get location area details from the API
+	locationDetails, err := getLocationAreaDetails(url, cfg.Cache)
+	if err != nil {
+		return err
+	}
+
+	// Display the location area name
+	fmt.Printf("Exploring %s...\n", &locationDetails.Name)
+
+	// Check if there are any Pokemon encounters
+	if len(locationDetails.PokemonEncounters) == 0 {
+		fmt.Println("No Pokemon found in this area.")
+		return nil
+	}
+
+	// Display the Pokemon found in this area
+	fmt.Println("Found Pokemon:")
+	for _, encounter := range locationDetails.PokemonEncounters {
+		fmt.Printf("- %s\n", encounter.Pokemon.Name)
+	}
+
+	return nil
+}
+
+func getLocationAreaDetails(url string, cache *pokecache.Cache) (LocationAreaDetails, error) {
+	// Make the HTTP GET request
+	body, err := makeGetRequest(url, cache)
+	if err != nil {
+		return LocationAreaDetails{}, err
+	}
+
+	// Unmarshal the JSON into the struct
+	var locationDetails LocationAreaDetails
+	err = json.Unmarshal(body, &locationDetails)
+	if err != nil {
+		return LocationAreaDetails{}, err
+	}
+
+	return locationDetails, nil
 }
 
 func makeGetRequest(url string, cache *pokecache.Cache) ([]byte, error) {
